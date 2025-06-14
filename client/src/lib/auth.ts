@@ -27,11 +27,11 @@ export const authApi = {
     return response.json();
   },
 
-  register: async (username: string, email: string, password: string): Promise<AuthResponse> => {
+  register: async (username: string, email: string, password: string, name?: string): Promise<AuthResponse> => {
     const response = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, email, password })
+      body: JSON.stringify({ username, email, password, name })
     });
     
     if (!response.ok) {

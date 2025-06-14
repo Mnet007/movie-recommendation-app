@@ -234,7 +234,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/movies/saved/:movieId", authenticateToken, async (req: AuthenticatedRequest, res) => {
     try {
       const movieId = req.params.movieId;
-      const removed = await storage.removeSavedMovie(req.user!.id, movieId);
+      const listType = req.query.listType as string || "favorites";
+      const removed = await storage.removeSavedMovie(req.user!.id, movieId, listType);
       
       if (!removed) {
         return res.status(404).json({ message: "Movie not found in saved list" });
@@ -244,6 +245,142 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error removing saved movie:", error);
       res.status(500).json({ message: "Failed to remove saved movie" });
+    }
+  });
+
+  // Watchlist routes
+  app.post("/api/watchlists", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const validation = createWatchlistSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          message: "Invalid watchlist data",
+          errors: validation.error.errors
+        });
+      }
+
+      const watchlist = await storage.createWatchlist({
+        ...validation.data,
+        userId: req.user!.id
+      });
+
+      res.status(201).json(watchlist);
+    } catch (error) {
+      console.error("Error creating watchlist:", error);
+      res.status(500).json({ message: "Failed to create watchlist" });
+    }
+  });
+
+  app.get("/api/watchlists", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const watchlists = await storage.getUserWatchlists(req.user!.id);
+      res.json(watchlists);
+    } catch (error) {
+      console.error("Error fetching watchlists:", error);
+      res.status(500).json({ message: "Failed to fetch watchlists" });
+    }
+  });
+
+  app.get("/api/watchlists/:id", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid watchlist ID" });
+      }
+
+      const watchlist = await storage.getWatchlist(id);
+      if (!watchlist) {
+        return res.status(404).json({ message: "Watchlist not found" });
+      }
+
+      // Check if user owns the watchlist or if it's public
+      if (watchlist.userId !== req.user!.id && !watchlist.isPublic) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const movies = await storage.getWatchlistMovies(id);
+      res.json({ ...watchlist, movies });
+    } catch (error) {
+      console.error("Error fetching watchlist:", error);
+      res.status(500).json({ message: "Failed to fetch watchlist" });
+    }
+  });
+
+  app.delete("/api/watchlists/:id", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid watchlist ID" });
+      }
+
+      const deleted = await storage.deleteWatchlist(id, req.user!.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Watchlist not found" });
+      }
+
+      res.json({ message: "Watchlist deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting watchlist:", error);
+      res.status(500).json({ message: "Failed to delete watchlist" });
+    }
+  });
+
+  app.post("/api/watchlists/:id/movies", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const watchlistId = parseInt(req.params.id);
+      if (isNaN(watchlistId)) {
+        return res.status(400).json({ message: "Invalid watchlist ID" });
+      }
+
+      const validation = addToWatchlistSchema.safeParse({
+        ...req.body,
+        watchlistId
+      });
+      if (!validation.success) {
+        return res.status(400).json({ 
+          message: "Invalid movie data",
+          errors: validation.error.errors
+        });
+      }
+
+      // Check if user owns the watchlist
+      const watchlist = await storage.getWatchlist(watchlistId);
+      if (!watchlist || watchlist.userId !== req.user!.id) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const movie = await storage.addMovieToWatchlist(validation.data);
+      res.status(201).json(movie);
+    } catch (error) {
+      console.error("Error adding movie to watchlist:", error);
+      res.status(500).json({ message: "Failed to add movie to watchlist" });
+    }
+  });
+
+  app.delete("/api/watchlists/:id/movies/:movieId", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const watchlistId = parseInt(req.params.id);
+      const movieId = req.params.movieId;
+
+      if (isNaN(watchlistId)) {
+        return res.status(400).json({ message: "Invalid watchlist ID" });
+      }
+
+      // Check if user owns the watchlist
+      const watchlist = await storage.getWatchlist(watchlistId);
+      if (!watchlist || watchlist.userId !== req.user!.id) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const removed = await storage.removeMovieFromWatchlist(watchlistId, movieId);
+      if (!removed) {
+        return res.status(404).json({ message: "Movie not found in watchlist" });
+      }
+
+      res.json({ message: "Movie removed from watchlist" });
+    } catch (error) {
+      console.error("Error removing movie from watchlist:", error);
+      res.status(500).json({ message: "Failed to remove movie from watchlist" });
     }
   });
 

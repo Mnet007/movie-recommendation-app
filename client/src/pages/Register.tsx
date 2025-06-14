@@ -23,12 +23,13 @@ export default function Register() {
       username: "",
       email: "",
       password: "",
+      name: "",
     },
   });
 
   const registerMutation = useMutation({
-    mutationFn: async (data: { username: string; email: string; password: string }) => {
-      return authApi.register(data.username, data.email, data.password);
+    mutationFn: async (data: { username: string; email: string; password: string; name?: string }) => {
+      return authApi.register(data.username, data.email, data.password, data.name);
     },
     onSuccess: (response) => {
       authApi.setAuth(response.token, response.user);
@@ -71,6 +72,24 @@ export default function Register() {
           <CardContent>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Full Name (Optional)</FormLabel>
+                      <FormControl>
+                        <Input 
+                          placeholder="Enter your full name" 
+                          {...field} 
+                          disabled={registerMutation.isPending}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
                 <FormField
                   control={form.control}
                   name="username"
