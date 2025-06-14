@@ -7,30 +7,41 @@ export const users = pgTable("users", {
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
-  role: text("role").notNull().default("user"),
-  status: text("status").notNull().default("active"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const activities = pgTable("activities", {
+export const savedMovies = pgTable("saved_movies", {
   id: serial("id").primaryKey(),
-  message: text("message").notNull(),
-  details: text("details"),
-  type: text("type").notNull(),
-  userId: integer("user_id"),
+  userId: integer("user_id").notNull(),
+  movieId: text("movie_id").notNull(), // TMDB movie ID
+  title: text("title").notNull(),
+  posterPath: text("poster_path"),
+  releaseDate: text("release_date"),
+  overview: text("overview"),
+  rating: integer("rating"), // User's personal rating 1-10
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-export const systemStats = pgTable("system_stats", {
-  id: serial("id").primaryKey(),
-  totalUsers: integer("total_users").notNull().default(0),
-  apiRequests: integer("api_requests").notNull().default(0),
-  collections: integer("collections").notNull().default(0),
-  uptime: text("uptime").notNull().default("99.9%"),
-  cpuUsage: integer("cpu_usage").notNull().default(0),
-  memoryUsage: integer("memory_usage").notNull().default(0),
-  storageUsage: integer("storage_usage").notNull().default(0),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+// Auth schemas
+export const loginSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(1, "Password is required"),
+});
+
+export const registerSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+});
+
+// Movie schemas
+export const saveMovieSchema = z.object({
+  movieId: z.string().min(1, "Movie ID is required"),
+  title: z.string().min(1, "Title is required"),
+  posterPath: z.string().optional(),
+  releaseDate: z.string().optional(),
+  overview: z.string().optional(),
+  rating: z.number().min(1).max(10).optional(),
 });
 
 export const insertUserSchema = createInsertSchema(users).omit({
@@ -38,18 +49,15 @@ export const insertUserSchema = createInsertSchema(users).omit({
   createdAt: true,
 });
 
-export const insertActivitySchema = createInsertSchema(activities).omit({
+export const insertSavedMovieSchema = createInsertSchema(savedMovies).omit({
   id: true,
   createdAt: true,
 });
 
-export const updateUserSchema = createInsertSchema(users).omit({
-  id: true,
-  createdAt: true,
-}).partial();
-
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type UpdateUser = z.infer<typeof updateUserSchema>;
 export type User = typeof users.$inferSelect;
-export type Activity = typeof activities.$inferSelect;
-export type SystemStats = typeof systemStats.$inferSelect;
+export type SavedMovie = typeof savedMovies.$inferSelect;
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type InsertSavedMovie = z.infer<typeof insertSavedMovieSchema>;
+export type LoginData = z.infer<typeof loginSchema>;
+export type RegisterData = z.infer<typeof registerSchema>;
+export type SaveMovieData = z.infer<typeof saveMovieSchema>;

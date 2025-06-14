@@ -1,179 +1,204 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertUserSchema, updateUserSchema } from "@shared/schema";
+import { loginSchema, registerSchema, saveMovieSchema } from "@shared/schema";
 import { z } from "zod";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
+const TMDB_API_KEY = process.env.TMDB_API_KEY;
+
+// Auth middleware
+interface AuthenticatedRequest extends Request {
+  user?: { id: number; email: string; username: string };
+}
+
+const authenticateToken = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ message: 'Access token required' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    const user = await storage.getUser(decoded.userId);
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+    req.user = user;
+    next();
+  } catch (error) {
+    return res.status(403).json({ message: 'Invalid token' });
+  }
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Get dashboard stats
-  app.get("/api/stats", async (req, res) => {
+  // Authentication routes
+  app.post("/api/auth/register", async (req, res) => {
     try {
-      let stats = await storage.getSystemStats();
-      if (!stats) {
-        stats = await storage.updateSystemStats();
-      }
-      res.json(stats);
-    } catch (error) {
-      console.error("Error fetching stats:", error);
-      res.status(500).json({ message: "Failed to fetch system stats" });
-    }
-  });
-
-  // Update dashboard stats
-  app.post("/api/stats/update", async (req, res) => {
-    try {
-      const stats = await storage.updateSystemStats();
-      res.json(stats);
-    } catch (error) {
-      console.error("Error updating stats:", error);
-      res.status(500).json({ message: "Failed to update system stats" });
-    }
-  });
-
-  // Get recent activities
-  app.get("/api/activities", async (req, res) => {
-    try {
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
-      const activities = await storage.getRecentActivities(limit);
-      res.json(activities);
-    } catch (error) {
-      console.error("Error fetching activities:", error);
-      res.status(500).json({ message: "Failed to fetch activities" });
-    }
-  });
-
-  // Get all users with pagination and search
-  app.get("/api/users", async (req, res) => {
-    try {
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 10;
-      const search = req.query.search as string;
-      const offset = (page - 1) * limit;
-
-      let users;
-      if (search) {
-        users = await storage.searchUsers(search);
-      } else {
-        users = await storage.getUsers(limit, offset);
-      }
-
-      res.json(users);
-    } catch (error) {
-      console.error("Error fetching users:", error);
-      res.status(500).json({ message: "Failed to fetch users" });
-    }
-  });
-
-  // Get user by ID
-  app.get("/api/users/:id", async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "Invalid user ID" });
-      }
-
-      const user = await storage.getUser(id);
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      res.json(user);
-    } catch (error) {
-      console.error("Error fetching user:", error);
-      res.status(500).json({ message: "Failed to fetch user" });
-    }
-  });
-
-  // Create new user
-  app.post("/api/users", async (req, res) => {
-    try {
-      const validation = insertUserSchema.safeParse(req.body);
+      const validation = registerSchema.safeParse(req.body);
       if (!validation.success) {
         return res.status(400).json({ 
-          message: "Invalid user data",
+          message: "Invalid registration data",
           errors: validation.error.errors
         });
       }
 
-      // Check if username or email already exists
+      // Check if user already exists
+      const existingUser = await storage.getUserByEmail(validation.data.email);
+      if (existingUser) {
+        return res.status(409).json({ message: "User already exists with this email" });
+      }
+
       const existingUsername = await storage.getUserByUsername(validation.data.username);
       if (existingUsername) {
-        return res.status(409).json({ message: "Username already exists" });
+        return res.status(409).json({ message: "Username already taken" });
       }
 
-      const existingEmail = await storage.getUserByEmail(validation.data.email);
-      if (existingEmail) {
-        return res.status(409).json({ message: "Email already exists" });
-      }
+      // Hash password
+      const hashedPassword = await bcrypt.hash(validation.data.password, 10);
+      
+      const user = await storage.createUser({
+        ...validation.data,
+        password: hashedPassword
+      });
 
-      const user = await storage.createUser(validation.data);
-      res.status(201).json(user);
+      // Generate JWT token
+      const token = jwt.sign(
+        { userId: user.id, email: user.email },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      res.status(201).json({ 
+        token, 
+        user: { id: user.id, email: user.email, username: user.username } 
+      });
     } catch (error) {
-      console.error("Error creating user:", error);
-      res.status(500).json({ message: "Failed to create user" });
+      console.error("Error during registration:", error);
+      res.status(500).json({ message: "Failed to register user" });
     }
   });
 
-  // Update user
-  app.put("/api/users/:id", async (req, res) => {
+  app.post("/api/auth/login", async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "Invalid user ID" });
-      }
-
-      const validation = updateUserSchema.safeParse(req.body);
+      const validation = loginSchema.safeParse(req.body);
       if (!validation.success) {
         return res.status(400).json({ 
-          message: "Invalid user data",
+          message: "Invalid login data",
           errors: validation.error.errors
         });
       }
 
-      // Check if username or email already exists (excluding current user)
-      if (validation.data.username) {
-        const existingUsername = await storage.getUserByUsername(validation.data.username);
-        if (existingUsername && existingUsername.id !== id) {
-          return res.status(409).json({ message: "Username already exists" });
-        }
-      }
-
-      if (validation.data.email) {
-        const existingEmail = await storage.getUserByEmail(validation.data.email);
-        if (existingEmail && existingEmail.id !== id) {
-          return res.status(409).json({ message: "Email already exists" });
-        }
-      }
-
-      const user = await storage.updateUser(id, validation.data);
+      const user = await storage.getUserByEmail(validation.data.email);
       if (!user) {
-        return res.status(404).json({ message: "User not found" });
+        return res.status(401).json({ message: "Invalid email or password" });
       }
 
-      res.json(user);
+      const isValidPassword = await bcrypt.compare(validation.data.password, user.password);
+      if (!isValidPassword) {
+        return res.status(401).json({ message: "Invalid email or password" });
+      }
+
+      // Generate JWT token
+      const token = jwt.sign(
+        { userId: user.id, email: user.email },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      res.json({ 
+        token, 
+        user: { id: user.id, email: user.email, username: user.username } 
+      });
     } catch (error) {
-      console.error("Error updating user:", error);
-      res.status(500).json({ message: "Failed to update user" });
+      console.error("Error during login:", error);
+      res.status(500).json({ message: "Failed to login" });
     }
   });
 
-  // Delete user
-  app.delete("/api/users/:id", async (req, res) => {
+  // Movie routes
+  app.get("/api/movies/search", async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
-      if (isNaN(id)) {
-        return res.status(400).json({ message: "Invalid user ID" });
+      const query = req.query.q as string;
+      if (!query) {
+        return res.status(400).json({ message: "Search query is required" });
       }
 
-      const deleted = await storage.deleteUser(id);
-      if (!deleted) {
-        return res.status(404).json({ message: "User not found" });
+      if (!TMDB_API_KEY) {
+        return res.status(500).json({ message: "TMDB API key not configured" });
       }
 
-      res.json({ message: "User deleted successfully" });
+      const response = await fetch(
+        `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}`
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch movies from TMDB');
+      }
+
+      const data = await response.json();
+      res.json(data);
     } catch (error) {
-      console.error("Error deleting user:", error);
-      res.status(500).json({ message: "Failed to delete user" });
+      console.error("Error searching movies:", error);
+      res.status(500).json({ message: "Failed to search movies" });
+    }
+  });
+
+  app.post("/api/movies/save", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const validation = saveMovieSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          message: "Invalid movie data",
+          errors: validation.error.errors
+        });
+      }
+
+      // Check if movie is already saved
+      const isAlreadySaved = await storage.isMovieSaved(req.user!.id, validation.data.movieId);
+      if (isAlreadySaved) {
+        return res.status(409).json({ message: "Movie already saved" });
+      }
+
+      const savedMovie = await storage.saveMovie({
+        ...validation.data,
+        userId: req.user!.id
+      });
+
+      res.status(201).json(savedMovie);
+    } catch (error) {
+      console.error("Error saving movie:", error);
+      res.status(500).json({ message: "Failed to save movie" });
+    }
+  });
+
+  app.get("/api/movies/saved", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const savedMovies = await storage.getSavedMovies(req.user!.id);
+      res.json(savedMovies);
+    } catch (error) {
+      console.error("Error fetching saved movies:", error);
+      res.status(500).json({ message: "Failed to fetch saved movies" });
+    }
+  });
+
+  app.delete("/api/movies/saved/:movieId", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const movieId = req.params.movieId;
+      const removed = await storage.removeSavedMovie(req.user!.id, movieId);
+      
+      if (!removed) {
+        return res.status(404).json({ message: "Movie not found in saved list" });
+      }
+
+      res.json({ message: "Movie removed from saved list" });
+    } catch (error) {
+      console.error("Error removing saved movie:", error);
+      res.status(500).json({ message: "Failed to remove saved movie" });
     }
   });
 
