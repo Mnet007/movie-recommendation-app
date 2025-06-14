@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { loginSchema, registerSchema, saveMovieSchema } from "@shared/schema";
+import { loginSchema, registerSchema, saveMovieSchema, createWatchlistSchema, addToWatchlistSchema } from "@shared/schema";
 import { z } from "zod";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
@@ -124,17 +124,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/movies/search", async (req, res) => {
     try {
       const query = req.query.q as string;
-      if (!query) {
-        return res.status(400).json({ message: "Search query is required" });
-      }
+      const genre = req.query.genre as string;
+      const year = req.query.year as string;
+      const page = req.query.page as string || "1";
 
       if (!TMDB_API_KEY) {
         return res.status(500).json({ message: "TMDB API key not configured" });
       }
 
-      const response = await fetch(
-        `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}`
-      );
+      let url = "";
+      let params = new URLSearchParams({
+        api_key: TMDB_API_KEY,
+        page: page
+      });
+
+      // Search by query
+      if (query && query.trim()) {
+        url = "https://api.themoviedb.org/3/search/movie";
+        params.append("query", query);
+        if (year) params.append("year", year);
+      } 
+      // Discover movies by genre/year
+      else if (genre || year) {
+        url = "https://api.themoviedb.org/3/discover/movie";
+        if (genre) params.append("with_genres", genre);
+        if (year) params.append("year", year);
+        params.append("sort_by", "popularity.desc");
+      }
+      // Default popular movies
+      else {
+        url = "https://api.themoviedb.org/3/movie/popular";
+      }
+
+      const response = await fetch(`${url}?${params.toString()}`);
 
       if (!response.ok) {
         throw new Error('Failed to fetch movies from TMDB');
@@ -145,6 +167,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error searching movies:", error);
       res.status(500).json({ message: "Failed to search movies" });
+    }
+  });
+
+  // Get movie genres
+  app.get("/api/movies/genres", async (req, res) => {
+    try {
+      if (!TMDB_API_KEY) {
+        return res.status(500).json({ message: "TMDB API key not configured" });
+      }
+
+      const response = await fetch(
+        `https://api.themoviedb.org/3/genre/movie/list?api_key=${TMDB_API_KEY}`
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch genres from TMDB');
+      }
+
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching genres:", error);
+      res.status(500).json({ message: "Failed to fetch genres" });
     }
   });
 

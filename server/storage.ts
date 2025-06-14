@@ -1,4 +1,4 @@
-import { users, savedMovies, type User, type InsertUser, type SavedMovie, type InsertSavedMovie } from "@shared/schema";
+import { users, savedMovies, userWatchlists, watchlistMovies, type User, type InsertUser, type SavedMovie, type InsertSavedMovie, type UserWatchlist, type InsertWatchlist, type WatchlistMovie, type InsertWatchlistMovie } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and } from "drizzle-orm";
 
@@ -11,9 +11,18 @@ export interface IStorage {
   
   // Movie operations
   saveMovie(movie: InsertSavedMovie): Promise<SavedMovie>;
-  getSavedMovies(userId: number): Promise<SavedMovie[]>;
-  removeSavedMovie(userId: number, movieId: string): Promise<boolean>;
-  isMovieSaved(userId: number, movieId: string): Promise<boolean>;
+  getSavedMovies(userId: number, listType?: string): Promise<SavedMovie[]>;
+  removeSavedMovie(userId: number, movieId: string, listType?: string): Promise<boolean>;
+  isMovieSaved(userId: number, movieId: string, listType?: string): Promise<boolean>;
+  
+  // Watchlist operations
+  createWatchlist(watchlist: InsertWatchlist): Promise<UserWatchlist>;
+  getUserWatchlists(userId: number): Promise<UserWatchlist[]>;
+  getWatchlist(id: number): Promise<UserWatchlist | undefined>;
+  deleteWatchlist(id: number, userId: number): Promise<boolean>;
+  addMovieToWatchlist(movie: InsertWatchlistMovie): Promise<WatchlistMovie>;
+  removeMovieFromWatchlist(watchlistId: number, movieId: string): Promise<boolean>;
+  getWatchlistMovies(watchlistId: number): Promise<WatchlistMovie[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -48,30 +57,94 @@ export class DatabaseStorage implements IStorage {
     return savedMovie;
   }
 
-  async getSavedMovies(userId: number): Promise<SavedMovie[]> {
+  async getSavedMovies(userId: number, listType = "favorites"): Promise<SavedMovie[]> {
     return await db
       .select()
       .from(savedMovies)
-      .where(eq(savedMovies.userId, userId))
+      .where(and(eq(savedMovies.userId, userId), eq(savedMovies.listType, listType)))
       .orderBy(desc(savedMovies.createdAt));
   }
 
-  async removeSavedMovie(userId: number, movieId: string): Promise<boolean> {
+  async removeSavedMovie(userId: number, movieId: string, listType = "favorites"): Promise<boolean> {
     const result = await db
       .delete(savedMovies)
-      .where(and(eq(savedMovies.userId, userId), eq(savedMovies.movieId, movieId)));
+      .where(and(
+        eq(savedMovies.userId, userId), 
+        eq(savedMovies.movieId, movieId),
+        eq(savedMovies.listType, listType)
+      ));
     
     return result.rowCount ? result.rowCount > 0 : false;
   }
 
-  async isMovieSaved(userId: number, movieId: string): Promise<boolean> {
+  async isMovieSaved(userId: number, movieId: string, listType = "favorites"): Promise<boolean> {
     const [movie] = await db
       .select()
       .from(savedMovies)
-      .where(and(eq(savedMovies.userId, userId), eq(savedMovies.movieId, movieId)))
+      .where(and(
+        eq(savedMovies.userId, userId), 
+        eq(savedMovies.movieId, movieId),
+        eq(savedMovies.listType, listType)
+      ))
       .limit(1);
     
     return !!movie;
+  }
+
+  async createWatchlist(watchlist: InsertWatchlist): Promise<UserWatchlist> {
+    const [newWatchlist] = await db
+      .insert(userWatchlists)
+      .values(watchlist)
+      .returning();
+    return newWatchlist;
+  }
+
+  async getUserWatchlists(userId: number): Promise<UserWatchlist[]> {
+    return await db
+      .select()
+      .from(userWatchlists)
+      .where(eq(userWatchlists.userId, userId))
+      .orderBy(desc(userWatchlists.createdAt));
+  }
+
+  async getWatchlist(id: number): Promise<UserWatchlist | undefined> {
+    const [watchlist] = await db
+      .select()
+      .from(userWatchlists)
+      .where(eq(userWatchlists.id, id));
+    return watchlist || undefined;
+  }
+
+  async deleteWatchlist(id: number, userId: number): Promise<boolean> {
+    const result = await db
+      .delete(userWatchlists)
+      .where(and(eq(userWatchlists.id, id), eq(userWatchlists.userId, userId)));
+    
+    return result.rowCount ? result.rowCount > 0 : false;
+  }
+
+  async addMovieToWatchlist(movie: InsertWatchlistMovie): Promise<WatchlistMovie> {
+    const [watchlistMovie] = await db
+      .insert(watchlistMovies)
+      .values(movie)
+      .returning();
+    return watchlistMovie;
+  }
+
+  async removeMovieFromWatchlist(watchlistId: number, movieId: string): Promise<boolean> {
+    const result = await db
+      .delete(watchlistMovies)
+      .where(and(eq(watchlistMovies.watchlistId, watchlistId), eq(watchlistMovies.movieId, movieId)));
+    
+    return result.rowCount ? result.rowCount > 0 : false;
+  }
+
+  async getWatchlistMovies(watchlistId: number): Promise<WatchlistMovie[]> {
+    return await db
+      .select()
+      .from(watchlistMovies)
+      .where(eq(watchlistMovies.watchlistId, watchlistId))
+      .orderBy(desc(watchlistMovies.addedAt));
   }
 }
 
