@@ -223,11 +223,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/movies/saved", authenticateToken, async (req: AuthenticatedRequest, res) => {
     try {
-      const savedMovies = await storage.getSavedMovies(req.user!.id);
+      const listType = req.query.listType as string || "favorites";
+      const savedMovies = await storage.getSavedMovies(req.user!.id, listType);
       res.json(savedMovies);
     } catch (error) {
       console.error("Error fetching saved movies:", error);
       res.status(500).json({ message: "Failed to fetch saved movies" });
+    }
+  });
+
+  // User profile route
+  app.get("/api/user/profile", authenticateToken, async (req: AuthenticatedRequest, res) => {
+    try {
+      const user = await storage.getUser(req.user!.id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const favorites = await storage.getSavedMovies(req.user!.id, "favorites");
+      const watchlists = await storage.getUserWatchlists(req.user!.id);
+
+      // Get watchlist counts
+      const watchlistsWithCounts = await Promise.all(
+        watchlists.map(async (watchlist) => {
+          const movies = await storage.getWatchlistMovies(watchlist.id);
+          return {
+            ...watchlist,
+            movieCount: movies.length
+          };
+        })
+      );
+
+      res.json({
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          name: user.name,
+          createdAt: user.createdAt
+        },
+        favorites,
+        watchlists: watchlistsWithCounts,
+        stats: {
+          favoriteCount: favorites.length,
+          watchlistCount: watchlists.length
+        }
+      });
+    } catch (error) {
+      console.error("Error fetching user profile:", error);
+      res.status(500).json({ message: "Failed to fetch user profile" });
     }
   });
 
