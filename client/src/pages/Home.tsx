@@ -1,9 +1,30 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Film, Search, Star, Users } from "lucide-react";
+import { Film, Search, Star, Users, User, LogOut } from "lucide-react";
+import { authApi } from "@/lib/auth";
+import { useState, useEffect } from "react";
+import { useLocation } from "wouter";
 
 export default function Home() {
+  const [user, setUser] = useState(authApi.getUser());
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setUser(authApi.getUser());
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  const handleLogout = () => {
+    authApi.logout();
+    setUser(null);
+    setLocation("/");
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       {/* Navigation */}
@@ -18,12 +39,29 @@ export default function Home() {
               <Link href="/search">
                 <Button variant="ghost">Search Movies</Button>
               </Link>
-              <Link href="/login">
-                <Button variant="outline">Login</Button>
-              </Link>
-              <Link href="/register">
-                <Button className="bg-blue-600 hover:bg-blue-700">Sign Up</Button>
-              </Link>
+              {user ? (
+                <div className="flex items-center space-x-4">
+                  <Link href="/profile">
+                    <Button variant="ghost">
+                      <User className="h-4 w-4 mr-2" />
+                      Profile
+                    </Button>
+                  </Link>
+                  <Button variant="outline" onClick={handleLogout}>
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Logout
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Link href="/login">
+                    <Button variant="outline">Login</Button>
+                  </Link>
+                  <Link href="/register">
+                    <Button className="bg-blue-600 hover:bg-blue-700">Sign Up</Button>
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </div>
