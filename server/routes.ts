@@ -36,6 +36,16 @@ const authenticateToken = async (req: AuthenticatedRequest, res: Response, next:
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Health check endpoint for deployment monitoring
+  app.get("/api/health", (_req, res) => {
+    res.json({ 
+      status: "OK", 
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || "development",
+      version: "1.0.0"
+    });
+  });
+
   // Authentication routes
   app.post("/api/auth/register", async (req, res) => {
     try {
